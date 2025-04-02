@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
-import { Home, Search, FlaskRoundIcon as Flask, History, Settings, ChevronRight, Beaker } from "lucide-react"
+import { Home, Search, FlaskRoundIcon as Flask, History, Settings, ChevronRight, Beaker, Trash2 } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -19,37 +19,50 @@ import {
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-
-// Mock data for recent prompts
-const MOCK_RECENT_PROMPTS = [
-  "best seo practices for e-commerce",
-  "how to optimize content for featured snippets",
-  "ai search engine ranking factors",
-  "structured data for better visibility",
-  "keyword research for ai search",
-]
+import { cn } from "@/lib/utils"
+import { getStoredAnalyses, removeAnalysis } from "@/lib/storage"
 
 export function AppSidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const [recentPrompts, setRecentPrompts] = useState<string[]>(MOCK_RECENT_PROMPTS)
   const [searchTerm, setSearchTerm] = useState("")
+  const [analyses, setAnalyses] = useState<Array<{ prompt: string; requestId: string }>>([])
 
-  // Extract current prompt from URL if on a prompt page
-  const currentPromptMatch = pathname?.match(/\/prompts\/([^/]+)/)
-  const currentPrompt = currentPromptMatch ? decodeURIComponent(currentPromptMatch[1]) : null
-
-  // Add current prompt to recent prompts if it's new
+  // Initialize analyses from localStorage on client side only
   useEffect(() => {
-    if (currentPrompt && !recentPrompts.includes(currentPrompt)) {
-      setRecentPrompts((prev) => [currentPrompt, ...prev].slice(0, 10))
+    const updateAnalyses = () => {
+      setAnalyses(getStoredAnalyses())
     }
-  }, [currentPrompt, recentPrompts])
 
-  // Filter prompts based on search term
-  const filteredPrompts = searchTerm
-    ? recentPrompts.filter((p) => p.toLowerCase().includes(searchTerm.toLowerCase()))
-    : recentPrompts
+    // Initial load
+    updateAnalyses()
+
+    // Listen for storage events (both from other tabs and our custom event)
+    window.addEventListener('storage', updateAnalyses)
+    window.addEventListener('analysisUpdated', updateAnalyses)
+
+    // Listen for route changes to refresh analyses
+    const handleRouteChange = () => {
+      updateAnalyses()
+    }
+    window.addEventListener('popstate', handleRouteChange)
+
+    return () => {
+      window.removeEventListener('storage', updateAnalyses)
+      window.removeEventListener('analysisUpdated', updateAnalyses)
+      window.removeEventListener('popstate', handleRouteChange)
+    }
+  }, [])
+
+  const handleDelete = (prompt: string) => {
+    removeAnalysis(prompt)
+    setAnalyses(getStoredAnalyses())
+  }
+
+  // Filter analyses based on search term
+  const filteredAnalyses = searchTerm
+    ? analyses.filter(({ prompt }) => prompt.toLowerCase().includes(searchTerm.toLowerCase()))
+    : analyses
 
   return (
     <Sidebar>
@@ -58,11 +71,26 @@ export function AppSidebar() {
           <Flask className="h-6 w-6 text-primary" />
           <span className="font-bold text-xl">Petri</span>
         </Link>
+        <div className="mt-4">
+          <Input
+            type="text"
+            placeholder="Search prompts..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="h-9"
+          />
+        </div>
+        <div className="mt-4">
+          <Button variant="default" className="w-full justify-start gap-2" onClick={() => router.push("/")}>
+            <Search className="h-4 w-4" />
+            New Search
+          </Button>
+        </div>
       </SidebarHeader>
 
       <SidebarContent>
         <SidebarGroup>
-          {/* <SidebarGroupLabel>Navigation</SidebarGroupLabel> */}
+          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -81,14 +109,14 @@ export function AppSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              {/* <SidebarMenuItem>
+              <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={pathname === "/settings"}>
                   <Link href="/settings">
                     <Settings className="h-4 w-4" />
                     <span>Settings</span>
                   </Link>
                 </SidebarMenuButton>
-              </SidebarMenuItem> */}
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -97,19 +125,38 @@ export function AppSidebar() {
           <SidebarGroupLabel>Prompts</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {filteredPrompts.length > 0 ? (
-                filteredPrompts.map((prompt) => (
-                  <SidebarMenuItem key={prompt}>
-                    <SidebarMenuButton asChild isActive={currentPrompt === prompt}>
-                      <Link href={`/prompts/${encodeURIComponent(prompt)}/visibility`}>
+              {filteredAnalyses.length > 0 ? (
+                filteredAnalyses.map(({ prompt, requestId }) => (
+                  <SidebarMenuItem key={requestId} className="group/menu-item relative">
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === `/prompts/${encodeURIComponent(prompt)}/visibility`}
+                      className="pr-10"
+                    >
+                      <Link href={`/prompts/${encodeURIComponent(prompt)}/visibility?id=${requestId}`}>
                         <Beaker className="h-4 w-4" />
                         <span>{prompt}</span>
                       </Link>
                     </SidebarMenuButton>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity absolute right-1 top-1/2 -translate-y-1/2"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleDelete(prompt);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </SidebarMenuItem>
                 ))
               ) : (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No prompts found</div>
+                <SidebarMenuItem>
+                  <SidebarMenuButton disabled>
+                    <span className="text-muted-foreground">No prompts yet</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               )}
             </SidebarMenu>
           </SidebarGroupContent>

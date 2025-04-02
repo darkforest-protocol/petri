@@ -9,15 +9,50 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { startAnalysis } from "@/lib/api"
+import { useToast } from "@/components/ui/use-toast"
+import { storeAnalysis } from "@/lib/storage"
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
+  const { toast } = useToast()
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (searchQuery.trim()) {
-      router.push(`/prompts/${encodeURIComponent(searchQuery)}/visibility`)
+    if (!searchQuery.trim()) return
+
+    setIsLoading(true)
+    
+    // Generate a temporary ID for the analysis
+    const tempId = crypto.randomUUID()
+    
+    // Redirect immediately to the visibility page
+    router.push(`/prompts/${encodeURIComponent(searchQuery.trim())}/visibility?id=${tempId}`)
+
+    try {
+      // Start the analysis in the background
+      const response = await startAnalysis({
+        prompt: searchQuery.trim(),
+        use_cache: true,
+        num_completions: 1
+      })
+
+      // Store the analysis in localStorage
+      storeAnalysis(searchQuery.trim(), response.request_id)
+
+      // Update the URL with the real request ID without refreshing the page
+      router.replace(`/prompts/${encodeURIComponent(searchQuery.trim())}/visibility?id=${response.request_id}`)
+    } catch (error) {
+      console.error('Failed to start analysis:', error)
+      toast({
+        title: "Error",
+        description: "Failed to start analysis. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -31,7 +66,7 @@ export default function Home() {
   ]
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-4 py-12">
+    <div className="flex flex-col items-center justify-center min-h-screen pl-40 px-4">
       <div className="w-full max-w-3xl mx-auto text-center space-y-8">
         <h1 className="text-4xl font-bold tracking-tight">What are your customers searching?</h1>
         <p className="text-lg text-muted-foreground">Optimise your site for AI search with <b>Petri</b></p>
@@ -43,14 +78,19 @@ export default function Home() {
               className="w-full h-14 pl-4 pr-12 text-lg rounded-xl"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              disabled={isLoading}
             />
             <Button
               type="submit"
               size="icon"
               className="absolute right-2 top-2 rounded-lg"
-              disabled={!searchQuery.trim()}
+              disabled={!searchQuery.trim() || isLoading}
             >
-              <ArrowRight className="h-5 w-5" />
+              {isLoading ? (
+                <div className="animate-spin h-5 w-5 border-2 border-current border-t-transparent rounded-full" />
+              ) : (
+                <ArrowRight className="h-5 w-5" />
+              )}
             </Button>
           </div>
 
@@ -61,9 +101,6 @@ export default function Home() {
                   <Button variant="outline" size="sm" disabled className="gap-2">
                     <Upload className="h-4 w-4" />
                     Upload CSV
-                    {/* <Badge variant="secondary" className="ml-1 text-xs">
-                      Coming Soon
-                    </Badge> */}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -78,9 +115,6 @@ export default function Home() {
                   <Button variant="outline" size="sm" disabled className="gap-2">
                     <Brain className="h-4 w-4" />
                     Generate Prompts
-                    {/* <Badge variant="secondary" className="ml-1 text-xs">
-                      Coming Soon
-                    </Badge> */}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
